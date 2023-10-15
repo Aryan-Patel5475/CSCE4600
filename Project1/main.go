@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -30,11 +31,11 @@ func main() {
 	// First-come, first-serve scheduling
 	FCFSSchedule(os.Stdout, "First-come, first-serve", processes)
 
-	//SJFSchedule(os.Stdout, "Shortest-job-first", processes)
+	SJFSchedule(os.Stdout, "Shortest-job-first", processes)
 	//
-	//SJFPrioritySchedule(os.Stdout, "Priority", processes)
+	SJFPrioritySchedule(os.Stdout, "Priority", processes)
 	//
-	//RRSchedule(os.Stdout, "Round-robin", processes)
+	RRSchedule(os.Stdout, "Round-robin", processes, 2)
 }
 
 func openProcessingFile(args ...string) (*os.File, func(), error) {
@@ -127,15 +128,208 @@ func FCFSSchedule(w io.Writer, title string, processes []Process) {
 	outputSchedule(w, schedule, aveWait, aveTurnaround, aveThroughput)
 }
 
-//func SJFPrioritySchedule(w io.Writer, title string, processes []Process) { }
-//
-//func SJFSchedule(w io.Writer, title string, processes []Process) { }
-//
-//func RRSchedule(w io.Writer, title string, processes []Process) { }
+func SJFPrioritySchedule(w io.Writer, title string, processes []Process) {
+	sort.Slice(processes, func(i, j int) bool {
+		if processes[i].ArrivalTime != processes[j].ArrivalTime {
+			return processes[i].ArrivalTime < processes[j].ArrivalTime
+		}
+		if processes[i].Priority != processes[j].Priority {
+			return processes[i].Priority < processes[j].Priority
+		}
+		return processes[i].BurstDuration < processes[j].BurstDuration
+	})
 
-//endregion
+	var (
+		currentTime int64
+		waitSum     float64
+		turnSum     float64
+		gantt       []TimeSlice
+		rows        [][]string
+	)
 
-//region Output helpers
+	remainingProcesses := make([]Process, len(processes))
+	copy(remainingProcesses, processes)
+
+	for len(remainingProcesses) > 0 {
+		var shortest *Process
+		for i := range remainingProcesses {
+			if remainingProcesses[i].ArrivalTime <= currentTime {
+				if shortest == nil || remainingProcesses[i].BurstDuration < shortest.BurstDuration || (remainingProcesses[i].BurstDuration == shortest.BurstDuration && remainingProcesses[i].Priority < shortest.Priority) {
+					shortest = &remainingProcesses[i]
+				}
+			}
+		}
+
+		if shortest == nil {
+			nextArrivalTime := remainingProcesses[0].ArrivalTime
+			for _, process := range remainingProcesses {
+				if process.ArrivalTime > currentTime && process.ArrivalTime < nextArrivalTime {
+					nextArrivalTime = process.ArrivalTime
+				}
+			}
+			currentTime = nextArrivalTime
+		} else {
+			gantt = append(gantt, TimeSlice{
+				PID:   shortest.ProcessID,
+				Start: currentTime,
+				Stop:  currentTime + shortest.BurstDuration,
+			})
+
+			waitSum += float64(currentTime - shortest.ArrivalTime)
+			turnSum += float64(currentTime+shortest.BurstDuration-shortest.ArrivalTime) - waitSum
+
+			rows = append(rows, []string{
+				strconv.FormatInt(shortest.ProcessID, 10),
+				strconv.FormatInt(shortest.Priority, 10),
+				strconv.FormatInt(shortest.BurstDuration, 10),
+				strconv.FormatInt(shortest.ArrivalTime, 10),
+				strconv.FormatFloat(float64(currentTime-shortest.ArrivalTime), 'f', 2, 64),
+				strconv.FormatFloat(float64(currentTime+shortest.BurstDuration-shortest.ArrivalTime), 'f', 2, 64),
+				strconv.FormatInt(currentTime+shortest.BurstDuration, 10),
+			})
+
+			for i, process := range remainingProcesses {
+				if process.ProcessID == shortest.ProcessID {
+					remainingProcesses = append(remainingProcesses[:i], remainingProcesses[i+1:]...)
+					break
+				}
+			}
+
+			currentTime += shortest.BurstDuration
+		}
+	}
+
+	throughput := float64(len(processes)) / float64(currentTime)
+
+	outputTitle(w, title)
+	outputGantt(w, gantt)
+	outputSchedule(w, rows, waitSum/float64(len(processes)), turnSum/float64(len(processes)), throughput)
+}
+
+func SJFSchedule(w io.Writer, title string, processes []Process) {
+	sort.Slice(processes, func(i, j int) bool {
+		return processes[i].ArrivalTime < processes[j].ArrivalTime
+	})
+
+	var (
+		currentTime int64
+		waitSum     float64
+		turnSum     float64
+		gantt       []TimeSlice
+		rows        [][]string
+	)
+
+	remainingProcesses := make([]Process, len(processes))
+	copy(remainingProcesses, processes)
+
+	for len(remainingProcesses) > 0 {
+		shortestIndex := 0
+		for i := range remainingProcesses {
+			if remainingProcesses[i].BurstDuration < remainingProcesses[shortestIndex].BurstDuration {
+				shortestIndex = i
+			}
+		}
+		shortest := &remainingProcesses[shortestIndex]
+
+		if shortest.ArrivalTime > currentTime {
+			currentTime = shortest.ArrivalTime
+		}
+
+		gantt = append(gantt, TimeSlice{
+			PID:   shortest.ProcessID,
+			Start: currentTime,
+			Stop:  currentTime + shortest.BurstDuration,
+		})
+
+		waitSum += float64(currentTime - shortest.ArrivalTime)
+		turnSum += float64(currentTime+shortest.BurstDuration-shortest.ArrivalTime) - waitSum
+
+		rows = append(rows, []string{
+			strconv.FormatInt(shortest.ProcessID, 10),
+			strconv.FormatInt(shortest.Priority, 10),
+			strconv.FormatInt(shortest.BurstDuration, 10),
+			strconv.FormatInt(shortest.ArrivalTime, 10),
+			strconv.FormatFloat(float64(currentTime-shortest.ArrivalTime), 'f', 2, 64),
+			strconv.FormatFloat(float64(currentTime+shortest.BurstDuration-shortest.ArrivalTime), 'f', 2, 64),
+			strconv.FormatInt(currentTime+shortest.BurstDuration, 10),
+		})
+
+		remainingProcesses = append(remainingProcesses[:shortestIndex], remainingProcesses[shortestIndex+1:]...)
+
+		currentTime += shortest.BurstDuration
+	}
+
+	throughput := float64(len(processes)) / float64(currentTime)
+
+	outputTitle(w, title)
+	outputGantt(w, gantt)
+	outputSchedule(w, rows, waitSum/float64(len(processes)), turnSum/float64(len(processes)), throughput)
+}
+
+// quantum time
+func RRSchedule(w io.Writer, title string, processes []Process, quantum int64) {
+	outputTitle(w, title)
+
+	sort.Slice(processes, func(i, j int) bool {
+		return processes[i].ArrivalTime < processes[j].ArrivalTime
+	})
+
+	var (
+		gantt   []TimeSlice
+		rows    [][]string
+		wait    float64
+		turn    float64
+		elapsed int64
+	)
+
+	queue := make([]Process, len(processes))
+	copy(queue, processes)
+
+	for len(queue) > 0 {
+		p := queue[0]
+		queue = queue[1:]
+
+		gantt = append(gantt, TimeSlice{p.ProcessID, elapsed, elapsed + min(p.BurstDuration, quantum)})
+		elapsed += min(p.BurstDuration, quantum)
+
+		p.BurstDuration -= min(p.BurstDuration, quantum)
+
+		if p.BurstDuration > 0 {
+			queue = append(queue, p)
+		} else {
+			w := float64(elapsed - p.ArrivalTime - priorityPenalty(p))
+			t := float64(elapsed - p.ArrivalTime)
+			wait += w
+			turn += t
+
+			rows = append(rows, []string{
+				strconv.FormatInt(p.ProcessID, 10),
+				strconv.FormatInt(p.Priority, 10),
+				strconv.FormatInt(p.BurstDuration, 10),
+				strconv.FormatInt(p.ArrivalTime, 10),
+				fmt.Sprintf("%.2f", w),
+				fmt.Sprintf("%.2f", t),
+				strconv.FormatInt(elapsed, 10),
+			})
+		}
+	}
+
+	tp := float64(len(processes)) / float64(elapsed)
+
+	outputGantt(w, gantt)
+	outputSchedule(w, rows, wait/float64(len(processes)), turn/float64(len(processes)), tp)
+}
+
+func priorityPenalty(p Process) int64 {
+	return (p.Priority - 1) * 5
+}
+
+func min(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
 
 func outputTitle(w io.Writer, title string) {
 	_, _ = fmt.Fprintln(w, strings.Repeat("-", len(title)*2))
