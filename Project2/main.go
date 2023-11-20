@@ -3,13 +3,12 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"github.com/Aryan-Patel5475/CSCE4600/Project2/builtins"
 	"io"
 	"os"
 	"os/exec"
 	"os/user"
 	"strings"
-
-	"github.com/jh125486/CSCE4600/Project2/builtins"
 )
 
 func main() {
@@ -73,11 +72,52 @@ func handleInput(w io.Writer, input string, exit chan<- struct{}) error {
 
 	// Check for built-in commands.
 	// New builtin commands should be added here. Eventually this should be refactored to its own func.
+	return handleBuiltinCommand(w, name, args, exit)
+}
+
+func handleBuiltinCommand(w io.Writer, name string, args []string, exit chan<- struct{}) error {
 	switch name {
 	case "cd":
 		return builtins.ChangeDirectory(args...)
 	case "env":
 		return builtins.EnvironmentVariables(w, args...)
+	case "whoami":
+		u, err := user.Current()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(w, u.Username)
+		return nil
+	case "pwd":
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(w, wd)
+		return nil
+	case "echo":
+		fmt.Fprintln(w, strings.Join(args, " "))
+		return nil
+	case "mkdir":
+		if len(args) == 0 {
+			return fmt.Errorf("mkdir: missing operand")
+		}
+		for _, dir := range args {
+			if err := os.Mkdir(dir, 0755); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "rm":
+		if len(args) == 0 {
+			return fmt.Errorf("rm: missing operand")
+		}
+		for _, file := range args {
+			if err := os.Remove(file); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "exit":
 		exit <- struct{}{}
 		return nil
