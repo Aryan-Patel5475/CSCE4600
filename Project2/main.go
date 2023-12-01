@@ -77,6 +77,8 @@ func handleInput(w io.Writer, input string, exit chan<- struct{}) error {
 		return builtins.ChangeDirectory(args...)
 	case "env":
 		return builtins.EnvironmentVariables(w, args...)
+	case "pwd":
+		return builtins.PrintWorkingDirectory()
 	case "exit":
 		exit <- struct{}{}
 		return nil
