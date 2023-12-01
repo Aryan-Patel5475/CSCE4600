@@ -12,6 +12,7 @@ import (
 )
 
 func main() {
+
 	exit := make(chan struct{}, 2) // buffer this so there's no deadlock.
 	runLoop(os.Stdin, os.Stdout, os.Stderr, exit)
 }
